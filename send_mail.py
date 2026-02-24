@@ -4,7 +4,7 @@ from email.mime.text import MIMEText
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
-FROM_EMAIL = "riccardo.abrami@we-wealth.com"
+FROM_EMAIL = "abramiriccardo4@gmail.com"
 TO_EMAIL = "oscar.logoteta@we-wealth.com"
 
 SMTP_USERNAME = os.environ.get("SMTP_USERNAME")
