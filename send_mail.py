@@ -2,10 +2,10 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 
-SMTP_SERVER = "smtp.example.com"      # <-- metti il server SMTP
-SMTP_PORT = 465                       # es. 465 per SSL, 587 per STARTTLS
-FROM_EMAIL = "tuoindirizzo@example.com"
-TO_EMAIL = "destinatario@example.com"
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 465
+FROM_EMAIL = "riccardo.abrami@we-wealth.com"
+TO_EMAIL = "oscar.logoteta@we-wealth.com"
 
 SMTP_USERNAME = os.environ.get("SMTP_USERNAME")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
