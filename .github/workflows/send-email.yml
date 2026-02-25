@@ -2,7 +2,7 @@ name: Email giornaliera Python
 
 on:
   schedule:
-    - cron: '0 8 * * *'   # 08:00 UTC ≈ 09:00 in inverno a Roma
+    - cron: 30 9 * * * *'    #09:30 UTC = 10:30 CET
   workflow_dispatch:
 
 jobs:
