@@ -15,6 +15,7 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
 def fetch_tech_news():
     """
     Recupera le 5 notizie tech piu' rilevanti dalle ultime 24 ore
+    con titolo, descrizione (2-3 righe) e link
     """
     news = []
     
@@ -33,8 +34,26 @@ def fetch_tech_news():
                 if title and len(title) > 15 and not link.startswith('#'):
                     if not link.startswith('http'):
                         link = 'https://www.reuters.com' + link
+                    
+                    # Estrai descrizione dal parent article/div
+                    description = ''
+                    parent = article.find_parent(['article', 'div'])
+                    if parent:
+                        # Cerca elementi con testo lungo (probabilmente descrizione)
+                        p_tags = parent.find_all('p', limit=2)
+                        for p in p_tags:
+                            desc_text = p.get_text(strip=True)
+                            if len(desc_text) > 20 and len(desc_text) < 300:
+                                description = desc_text
+                                break
+                    
+                    # Se non trova descrizione, crea una breve
+                    if not description:
+                        description = f"Ultima notizia da Reuters"
+                    
                     news.append({
                         'title': title,
+                        'description': description[:200],  # Limita a ~200 caratteri
                         'link': link,
                         'source': 'Reuters'
                     })
@@ -53,8 +72,23 @@ def fetch_tech_news():
                 title = article.get_text(strip=True)
                 link = article.get('href', '')
                 if title and len(title) > 15 and 'techcrunch' in link.lower() and title not in [n['title'] for n in news]:
+                    # Estrai descrizione
+                    description = ''
+                    parent = article.find_parent(['article', 'div'])
+                    if parent:
+                        p_tags = parent.find_all('p', limit=2)
+                        for p in p_tags:
+                            desc_text = p.get_text(strip=True)
+                            if len(desc_text) > 20 and len(desc_text) < 300:
+                                description = desc_text
+                                break
+                    
+                    if not description:
+                        description = f"Ultima notizia da TechCrunch"
+                    
                     news.append({
                         'title': title,
+                        'description': description[:200],
                         'link': link,
                         'source': 'TechCrunch'
                     })
@@ -75,8 +109,24 @@ def fetch_tech_news():
                 if title and len(title) > 15 and not link.startswith('#') and title not in [n['title'] for n in news]:
                     if not link.startswith('http'):
                         link = 'https://www.theverge.com' + link
+                    
+                    # Estrai descrizione
+                    description = ''
+                    parent = article.find_parent(['article', 'div'])
+                    if parent:
+                        p_tags = parent.find_all('p', limit=2)
+                        for p in p_tags:
+                            desc_text = p.get_text(strip=True)
+                            if len(desc_text) > 20 and len(desc_text) < 300:
+                                description = desc_text
+                                break
+                    
+                    if not description:
+                        description = f"Ultima notizia da The Verge"
+                    
                     news.append({
                         'title': title,
+                        'description': description[:200],
                         'link': link,
                         'source': 'The Verge'
                     })
@@ -89,7 +139,7 @@ def format_news_body(news_list):
     """
     Formatta le notizie nel corpo dell'email secondo il formato richiesto:
     TITOLO DELLA NOTIZIA
-    Testo descrittivo una riga sola.
+    Descrizione 2-3 righe.
     Fonte: Nome Testata
     Link: URL
     """
@@ -102,12 +152,12 @@ def format_news_body(news_list):
             # Titolo in MAIUSCOLO
             title_upper = news['title'].upper()
             
-            # Testo descrittivo (usa il dominio come descrizione breve)
-            description = f"Ultima notizia da {news['source']}"
+            # Descrizione (2-3 righe)
+            description = news.get('description', f"Ultima notizia da {news['source']}")
             
             # Formatta secondo lo schema richiesto
             body += title_upper + "\n"
-            body += description + ".\n"
+            body += description + "\n"
             body += "Fonte: " + news['source'] + "\n"
             body += "Link: " + news['link'] + "\n"
             
