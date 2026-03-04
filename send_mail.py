@@ -10,7 +10,7 @@ import re
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
 FROM_EMAIL = "abramiriccardo4@gmail.com"
-TO_EMAIL = "milanotoonight@gmail.com"
+TO_EMAIL = "oscar.logoteta@we-wealth.com"
 SMTP_USERNAME = os.environ.get("SMTP_USERNAME")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
 
