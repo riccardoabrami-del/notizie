@@ -1,9 +1,11 @@
 import os
 import smtplib
 import requests
-from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
 from email.mime.text import MIMEText
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+from html import unescape
+import re
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
@@ -12,181 +14,138 @@ TO_EMAIL = "milanotoonight@gmail.com"
 SMTP_USERNAME = os.environ.get("SMTP_USERNAME")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
 
+# Feed RSS reali e affidabili - aggiornati in tempo reale
+RSS_FEEDS = [
+    {"url": "https://techcrunch.com/feed/", "source": "TechCrunch"},
+    {"url": "https://feeds.arstechnica.com/arstechnica/technology-lab", "source": "Ars Technica"},
+    {"url": "https://www.theverge.com/rss/index.xml", "source": "The Verge"},
+    {"url": "https://feeds.feedburner.com/venturebeat/SZYF", "source": "VentureBeat"},
+    {"url": "https://www.wired.com/feed/rss", "source": "Wired"},
+]
+
+def clean_html(text):
+    """Rimuove tag HTML e decodifica entita' HTML"""
+    if not text:
+        return ""
+    text = re.sub(r'<[^>]+>', '', text)
+    text = unescape(text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
 def fetch_tech_news():
-    """
-    Recupera le 5 notizie tech piu' rilevanti dalle ultime 24 ore
-    con titolo, descrizione (2-3 righe) e link
-    """
+    """Recupera notizie tech reali dai feed RSS delle principali testate"""
     news = []
-    
-    # Notizie da Reuters Technology
-    try:
-        response = requests.get('https://www.reuters.com/technology/', timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
-        soup = BeautifulSoup(response.content, 'html.parser')
-        articles = soup.find_all('a', {'data-testid': 'Link'}, limit=10)
-        for article in articles:
-            if len(news) >= 5:
-                break
-            title_elem = article.find(['span', 'h3'])
-            if title_elem:
-                title = title_elem.get_text(strip=True)
-                link = article.get('href', '')
-                if title and len(title) > 15 and not link.startswith('#'):
-                    if not link.startswith('http'):
-                        link = 'https://www.reuters.com' + link
-                    
-                    # Estrai descrizione dal parent article/div
-                    description = ''
-                    parent = article.find_parent(['article', 'div'])
-                    if parent:
-                        # Cerca elementi con testo lungo (probabilmente descrizione)
-                        p_tags = parent.find_all('p', limit=2)
-                        for p in p_tags:
-                            desc_text = p.get_text(strip=True)
-                            if len(desc_text) > 20 and len(desc_text) < 300:
-                                description = desc_text
-                                break
-                    
-                    # Se non trova descrizione, crea una breve
-                    if not description:
-                        description = f"Ultima notizia da Reuters"
-                    
-                    news.append({
-                        'title': title,
-                        'description': description[:200],  # Limita a ~200 caratteri
-                        'link': link,
-                        'source': 'Reuters'
-                    })
-    except Exception as e:
-        print(f"Errore Reuters: {e}")
-    
-    # Notizie da TechCrunch
-    if len(news) < 5:
+    headers = {'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)'}
+
+    for feed in RSS_FEEDS:
+        if len(news) >= 5:
+            break
         try:
-            response = requests.get('https://techcrunch.com/', timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
-            soup = BeautifulSoup(response.content, 'html.parser')
-            articles = soup.find_all('a', limit=20)
-            for article in articles:
+            response = requests.get(feed["url"], timeout=15, headers=headers)
+            response.raise_for_status()
+
+            root = ET.fromstring(response.content)
+
+            # Supporta sia RSS 2.0 (<channel><item>) che Atom (<entry>)
+            ns = {'atom': 'http://www.w3.org/2005/Atom'}
+
+            # Prova formato RSS 2.0
+            items = root.findall('.//item')
+
+            # Se non trova item, prova formato Atom
+            if not items:
+                items = root.findall('.//atom:entry', ns)
+                if not items:
+                    items = root.findall('.//{http://www.w3.org/2005/Atom}entry')
+
+            for item in items[:3]:
                 if len(news) >= 5:
                     break
-                title = article.get_text(strip=True)
-                link = article.get('href', '')
-                if title and len(title) > 15 and 'techcrunch' in link.lower() and title not in [n['title'] for n in news]:
-                    # Estrai descrizione
-                    description = ''
-                    parent = article.find_parent(['article', 'div'])
-                    if parent:
-                        p_tags = parent.find_all('p', limit=2)
-                        for p in p_tags:
-                            desc_text = p.get_text(strip=True)
-                            if len(desc_text) > 20 and len(desc_text) < 300:
-                                description = desc_text
-                                break
-                    
-                    if not description:
-                        description = f"Ultima notizia da TechCrunch"
-                    
-                    news.append({
-                        'title': title,
-                        'description': description[:200],
-                        'link': link,
-                        'source': 'TechCrunch'
-                    })
+
+                # Titolo
+                title_elem = item.find('title')
+                if title_elem is None:
+                    title_elem = item.find('{http://www.w3.org/2005/Atom}title')
+                title = clean_html(title_elem.text) if title_elem is not None else ""
+
+                if not title or len(title) < 10:
+                    continue
+
+                # Link
+                link = ""
+                link_elem = item.find('link')
+                if link_elem is not None:
+                    link = link_elem.text or link_elem.get('href', '')
+                if not link:
+                    link_elem = item.find('{http://www.w3.org/2005/Atom}link')
+                    if link_elem is not None:
+                        link = link_elem.get('href', '')
+
+                # Descrizione
+                desc = ""
+                for tag in ['description', 'summary', '{http://www.w3.org/2005/Atom}summary',
+                             'content', '{http://www.w3.org/2005/Atom}content']:
+                    desc_elem = item.find(tag)
+                    if desc_elem is not None and desc_elem.text:
+                        desc = clean_html(desc_elem.text)
+                        break
+
+                # Tronca descrizione a ~250 caratteri mantenendo frasi complete
+                if len(desc) > 250:
+                    desc = desc[:250].rsplit(' ', 1)[0] + '...'
+
+                news.append({
+                    'title': title,
+                    'description': desc if desc else "Leggi l'articolo completo al link.",
+                    'link': link.strip() if link else '',
+                    'source': feed['source']
+                })
+
+            print(f"[{feed['source']}] trovate {len([n for n in news if n['source'] == feed['source']])} notizie")
+
         except Exception as e:
-            print(f"Errore TechCrunch: {e}")
-    
-    # Notizie da The Verge
-    if len(news) < 5:
-        try:
-            response = requests.get('https://www.theverge.com/', timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
-            soup = BeautifulSoup(response.content, 'html.parser')
-            articles = soup.find_all('a', limit=20)
-            for article in articles:
-                if len(news) >= 5:
-                    break
-                title = article.get_text(strip=True)
-                link = article.get('href', '')
-                if title and len(title) > 15 and not link.startswith('#') and title not in [n['title'] for n in news]:
-                    if not link.startswith('http'):
-                        link = 'https://www.theverge.com' + link
-                    
-                    # Estrai descrizione
-                    description = ''
-                    parent = article.find_parent(['article', 'div'])
-                    if parent:
-                        p_tags = parent.find_all('p', limit=2)
-                        for p in p_tags:
-                            desc_text = p.get_text(strip=True)
-                            if len(desc_text) > 20 and len(desc_text) < 300:
-                                description = desc_text
-                                break
-                    
-                    if not description:
-                        description = f"Ultima notizia da The Verge"
-                    
-                    news.append({
-                        'title': title,
-                        'description': description[:200],
-                        'link': link,
-                        'source': 'The Verge'
-                    })
-        except Exception as e:
-            print(f"Errore The Verge: {e}")
-    
+            print(f"Errore {feed['source']}: {e}")
+
     return news[:5]
 
 def format_news_body(news_list):
-    """
-    Formatta le notizie nel corpo dell'email secondo il formato richiesto:
-    TITOLO DELLA NOTIZIA
-    Descrizione 2-3 righe.
-    Fonte: Nome Testata
-    Link: URL
-    """
-    body = ""
-    
+    """Formatta le notizie per il corpo dell'email"""
+    oggi = datetime.now(timezone(timedelta(hours=1))).strftime("%d/%m/%Y")
+    body = f"NOTIZIE TECH DEL {oggi}\n"
+    body += "=" * 40 + "\n\n"
+
     if not news_list:
-        body = "Non e' stato possibile recuperare notizie al momento."
+        body += "Non e' stato possibile recuperare notizie al momento. Riprova piu' tardi."
     else:
         for idx, news in enumerate(news_list, 1):
-            # Titolo in MAIUSCOLO
-            title_upper = news['title'].upper()
-            
-            # Descrizione (2-3 righe)
-            description = news.get('description', f"Ultima notizia da {news['source']}")
-            
-            # Formatta secondo lo schema richiesto
-            body += title_upper + "\n"
-            body += description + "\n"
-            body += "Fonte: " + news['source'] + "\n"
-            body += "Link: " + news['link'] + "\n"
-            
+            body += f"{idx}. {news['title'].upper()}\n"
+            body += f"{news['description']}\n"
+            body += f"Fonte: {news['source']}\n"
+            body += f"Link: {news['link']}\n"
             if idx < len(news_list):
-                body += "\n"
-    
+                body += "\n" + "-" * 40 + "\n\n"
+
     return body
 
 def send_email():
-    # Recupera le notizie
     news_list = fetch_tech_news()
-    
-    # Formatta il corpo della email
-    subject = "notizie tech del giorno"
+    oggi = datetime.now(timezone(timedelta(hours=1))).strftime("%d/%m/%Y")
+    subject = f"Notizie Tech del {oggi}"
     body = format_news_body(news_list)
-    
-    # Crea il messaggio
+
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = FROM_EMAIL
     msg["To"] = TO_EMAIL
-    
-    # Invia l'email
+
     try:
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
             server.login(SMTP_USERNAME, SMTP_PASSWORD)
             server.send_message(msg)
         print(f"Email inviata con successo a {TO_EMAIL}")
         print(f"Notizie inviate: {len(news_list)}")
+        for n in news_list:
+            print(f"  - [{n['source']}] {n['title']}")
         return True
     except Exception as e:
         print(f"Errore nell'invio dell'email: {e}")
